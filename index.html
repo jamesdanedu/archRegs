@@ -2920,5 +2920,1100 @@
                 return rule ? rule.title : 'Unknown Rule';
             }
             
-            getRuleRegulation(ruleId) {
-                const rule = this.ruleEngine.getActiveRules().fin
+getRuleRegulation(ruleId) {
+                const rule = this.ruleEngine.getActiveRules().find(r => r.id === ruleId);
+                return rule ? rule.regulation : '';
+            }
+            
+            highlightObject(mesh) {
+                // Clear previous highlight
+                this.clearHighlight();
+                
+                // Store selected element
+                this.selectedElement = mesh;
+                
+                // Change material color for the selected object
+                if (mesh.material) {
+                    if (Array.isArray(mesh.material)) {
+                        mesh.material.forEach(mat => {
+                            mat._originalColor = mat.color.clone();
+                            mat.color.set(0xffff00);
+                        });
+                    } else {
+                        mesh.material._originalColor = mesh.material.color.clone();
+                        mesh.material.color.set(0xffff00);
+                    }
+                }
+            }
+            
+            clearHighlight() {
+                if (this.selectedElement) {
+                    if (this.selectedElement.material) {
+                        if (Array.isArray(this.selectedElement.material)) {
+                            this.selectedElement.material.forEach(mat => {
+                                if (mat._originalColor) {
+                                    mat.color.copy(mat._originalColor);
+                                }
+                            });
+                        } else {
+                            if (this.selectedElement.material._originalColor) {
+                                this.selectedElement.material.color.copy(this.selectedElement.material._originalColor);
+                            }
+                        }
+                    }
+                    
+                    this.selectedElement = null;
+                }
+            }
+            
+            resetView() {
+                if (!this.model) return;
+                
+                // Create a bounding box for the entire model
+                const boundingBox = new THREE.Box3().setFromObject(this.model);
+                const center = boundingBox.getCenter(new THREE.Vector3());
+                const size = boundingBox.getSize(new THREE.Vector3());
+                
+                // Calculate the distance based on the size
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const fov = this.camera.fov * (Math.PI / 180);
+                let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+                
+                // Set a minimum distance
+                cameraZ = Math.max(cameraZ, 10);
+                
+                // Update camera position
+                this.camera.position.set(center.x + cameraZ * 0.5, center.y + cameraZ * 0.5, center.z + cameraZ);
+                this.camera.lookAt(center);
+                
+                // Update controls target
+                this.controls.target.copy(center);
+                this.controls.update();
+            }
+            
+            toggleSectionPlane() {
+                if (this.sectionPlaneActive) {
+                    // Remove section plane
+                    this.renderer.localClippingEnabled = false;
+                    this.scene.remove(this.sectionPlane);
+                    this.sectionPlaneActive = false;
+                    document.getElementById('section-plane').classList.remove('toggle-active');
+                } else {
+                    // Add section plane
+                    this.renderer.localClippingEnabled = true;
+                    
+                    // Create clipping plane
+                    this.clippingPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+                    
+                    // Create a visual representation of the plane
+                    const planeGeometry = new THREE.PlaneGeometry(50, 50);
+                    const planeMaterial = new THREE.MeshBasicMaterial({
+                        color: 0x00ff00,
+                        side: THREE.DoubleSide,
+                        transparent: true,
+                        opacity: 0.2
+                    });
+                    
+                    this.sectionPlane = new THREE.Mesh(planeGeometry, planeMaterial);
+                    this.sectionPlane.position.set(0, 0, 0);
+                    
+                    // Add to scene
+                    this.scene.add(this.sectionPlane);
+                    this.sectionPlaneActive = true;
+                    document.getElementById('section-plane').classList.add('toggle-active');
+                    
+                    // Apply clipping plane to all meshes
+                    this.model.traverse(child => {
+                        if (child.isMesh) {
+                            if (Array.isArray(child.material)) {
+                                child.material.forEach(mat => {
+                                    mat.clippingPlanes = [this.clippingPlane];
+                                });
+                            } else {
+                                child.material.clippingPlanes = [this.clippingPlane];
+                            }
+                        }
+                    });
+                }
+            }
+            
+            setMeasurementTool(tool) {
+                this.activeMeasurementTool = tool;
+                
+                // Update UI
+                document.querySelectorAll('.measurement-button').forEach(button => {
+                    button.classList.remove('active');
+                });
+                document.getElementById(`${tool}-tool`).classList.add('active');
+                
+                // Clear previous measurements
+                this.clearMeasurements();
+                
+                // Show measurement info
+                this.measurementInfo.classList.add('active');
+                this.measurementInfo.textContent = `Click to place measurement points`;
+            }
+            
+            handleMeasurementClick() {
+                if (!this.activeMeasurementTool) return;
+                
+                this.raycaster.setFromCamera(this.mouse, this.camera);
+                
+                // Get all meshes from the model
+                const meshes = [];
+                this.model.traverse(child => {
+                    if (child.isMesh || child.isGroup) {
+                        meshes.push(child);
+                    }
+                });
+                
+                const intersects = this.raycaster.intersectObjects(meshes);
+                
+                if (intersects.length > 0) {
+                    const point = intersects[0].point.clone();
+                    
+                    // Add point to measurement points
+                    this.measurementPoints.push(point);
+                    
+                    // Create a visual marker at the clicked point
+                    const markerGeometry = new THREE.SphereGeometry(0.05, 16, 16);
+                    const markerMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                    const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+                    marker.position.copy(point);
+                    this.scene.add(marker);
+                    
+                    this.measurementObjects.push(marker);
+                    
+                    // Handle different measurement tools
+                    if (this.activeMeasurementTool === 'distance') {
+                        if (this.measurementPoints.length === 2) {
+                            this.createDistanceMeasurement();
+                        }
+                    } else if (this.activeMeasurementTool === 'area') {
+                        if (this.measurementPoints.length >= 3) {
+                            this.createAreaMeasurement();
+                        }
+                    } else if (this.activeMeasurementTool === 'angle') {
+                        if (this.measurementPoints.length === 3) {
+                            this.createAngleMeasurement();
+                        }
+                    }
+                }
+            }
+            
+            createDistanceMeasurement() {
+                const start = this.measurementPoints[0];
+                const end = this.measurementPoints[1];
+                
+                // Create a line between the points
+                const lineGeometry = new THREE.BufferGeometry().setFromPoints([start, end]);
+                const lineMaterial = new THREE.LineBasicMaterial({ color: 0xff0000 });
+                const line = new THREE.Line(lineGeometry, lineMaterial);
+                this.scene.add(line);
+                this.measurementObjects.push(line);
+                
+                // Calculate distance
+                const distance = start.distanceTo(end);
+                
+                // Create a label at the midpoint
+                const midpoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+                
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'measurement-label';
+                labelDiv.textContent = `${distance.toFixed(2)} m`;
+                
+                const label = new CSS2DObject(labelDiv);
+                label.position.copy(midpoint);
+                this.scene.add(label);
+                this.measurementObjects.push(label);
+                
+                // Update info panel
+                this.measurementInfo.textContent = `Distance: ${distance.toFixed(2)} m`;
+                
+                // Reset for next measurement
+                this.measurementPoints = [];
+            }
+            
+            createAreaMeasurement() {
+                // Create a shape from the points
+                const shape = new THREE.Shape();
+                shape.moveTo(this.measurementPoints[0].x, this.measurementPoints[0].z);
+                
+                for (let i = 1; i < this.measurementPoints.length; i++) {
+                    shape.lineTo(this.measurementPoints[i].x, this.measurementPoints[i].z);
+                }
+                
+                shape.lineTo(this.measurementPoints[0].x, this.measurementPoints[0].z);
+                
+                // Create geometry
+                const shapeGeometry = new THREE.ShapeGeometry(shape);
+                
+                // Create mesh
+                const shapeMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xff0000,
+                    transparent: true,
+                    opacity: 0.3,
+                    side: THREE.DoubleSide
+                });
+                
+                const shapeMesh = new THREE.Mesh(shapeGeometry, shapeMaterial);
+                
+                // Rotate to correct orientation
+                shapeMesh.rotation.x = Math.PI / 2;
+                
+                // Set position based on average Y
+                let avgY = 0;
+                this.measurementPoints.forEach(p => avgY += p.y);
+                avgY /= this.measurementPoints.length;
+                shapeMesh.position.y = avgY + 0.01; // Offset slightly to avoid z-fighting
+                
+                this.scene.add(shapeMesh);
+                this.measurementObjects.push(shapeMesh);
+                
+                // Calculate area
+                let area = 0;
+                const points = this.measurementPoints.map(p => new THREE.Vector2(p.x, p.z));
+                
+                for (let i = 0; i < points.length; i++) {
+                    const j = (i + 1) % points.length;
+                    area += points[i].x * points[j].y;
+                    area -= points[j].x * points[i].y;
+                }
+                
+                area = Math.abs(area) / 2;
+                
+                // Create a label at the centroid
+                const centroid = new THREE.Vector3();
+                this.measurementPoints.forEach(p => centroid.add(p));
+                centroid.divideScalar(this.measurementPoints.length);
+                
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'measurement-label';
+                labelDiv.textContent = `${area.toFixed(2)} m²`;
+                
+                const label = new CSS2DObject(labelDiv);
+                label.position.copy(centroid);
+                this.scene.add(label);
+                this.measurementObjects.push(label);
+                
+                // Update info panel
+                this.measurementInfo.textContent = `Area: ${area.toFixed(2)} m²`;
+                
+                // Reset for next measurement
+                this.measurementPoints = [];
+            }
+            
+            createAngleMeasurement() {
+                const p1 = this.measurementPoints[0];
+                const p2 = this.measurementPoints[1];
+                const p3 = this.measurementPoints[2];
+                
+                // Create lines
+                const line1Geometry = new THREE.BufferGeometry().setFromPoints([p2, p1]);
+                const line2Geometry = new THREE.BufferGeometry().setFromPoints([p2, p3]);
+                
+                const lineMaterial = new THREE.LineBasicMaterial({ color: 0xff0000 });
+                
+                const line1 = new THREE.Line(line1Geometry, lineMaterial);
+                const line2 = new THREE.Line(line2Geometry, lineMaterial);
+                
+                this.scene.add(line1);
+                this.scene.add(line2);
+                
+                this.measurementObjects.push(line1);
+                this.measurementObjects.push(line2);
+                
+                // Calculate angle
+                const v1 = new THREE.Vector3().subVectors(p1, p2).normalize();
+                const v2 = new THREE.Vector3().subVectors(p3, p2).normalize();
+                
+                let angle = Math.acos(v1.dot(v2));
+                angle = angle * (180 / Math.PI); // Convert to degrees
+                
+                // Create a label
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'measurement-label';
+                labelDiv.textContent = `${angle.toFixed(1)}°`;
+                
+                const label = new CSS2DObject(labelDiv);
+                label.position.copy(p2);
+                this.scene.add(label);
+                this.measurementObjects.push(label);
+                
+                // Update info panel
+                this.measurementInfo.textContent = `Angle: ${angle.toFixed(1)}°`;
+                
+                // Reset for next measurement
+                this.measurementPoints = [];
+            }
+            
+            clearMeasurements() {
+                // Remove all measurement objects from the scene
+                this.measurementObjects.forEach(obj => {
+                    this.scene.remove(obj);
+                });
+                
+                this.measurementObjects = [];
+                this.measurementPoints = [];
+            }
+            
+            runFireSafetyCheck() {
+                this.showLoading('Running fire safety check...');
+                
+                // Get current building type
+                const buildingType = this.buildingTypeSelect.value;
+                this.ruleEngine.setActiveRuleSet(buildingType);
+                
+                // Update building info
+                this.updateBuildingInfo();
+                
+                // Run validation
+                const results = this.ruleEngine.validateModel(this.elements, this.buildingInfo);
+                
+                // Update the UI with results
+                this.updateIssuesPanel(results);
+                
+                // Create annotations for issues
+                this.createIssueAnnotations(results);
+                
+                // Update report panel
+                this.updateReportPanel();
+                
+                // Switch to issues panel
+                this.switchPanel('issues');
+                
+                // Show success message
+                this.hideLoading();
+                alert(`Fire safety check completed. Found ${results.length} issues.`);
+            }
+            
+            updateIssuesPanel(results) {
+                // Clear issues list
+                this.issuesList.innerHTML = '';
+                
+                // Update issue counts
+                document.getElementById('critical-count').textContent = this.ruleEngine.resultsBySeverity.critical.length;
+                document.getElementById('major-count').textContent = this.ruleEngine.resultsBySeverity.major.length;
+                document.getElementById('minor-count').textContent = this.ruleEngine.resultsBySeverity.minor.length;
+                
+                // Create issue items
+                results.forEach((issue, index) => {
+                    const issueItem = document.createElement('div');
+                    issueItem.className = `issue-item ${issue.severity}`;
+                    issueItem.dataset.id = index;
+                    issueItem.dataset.severity = issue.severity;
+                    issueItem.dataset.elementType = issue.element.userData.type;
+                    
+                    const rule = this.ruleEngine.getActiveRules().find(r => r.id === issue.ruleId);
+                    
+                    issueItem.innerHTML = `
+                        <div class="issue-header">
+                            <div class="issue-title">${rule ? rule.title : 'Unknown Issue'}</div>
+                            <div class="issue-severity ${issue.severity}">${issue.severity.charAt(0).toUpperCase() + issue.severity.slice(1)}</div>
+                        </div>
+                        <div class="issue-element">${issue.element.userData.name}</div>
+                        <div class="issue-description">${issue.description}</div>
+                        <div class="issue-regulation">${rule ? rule.regulation : ''}</div>
+                        <div class="issue-actions">
+                            <button class="show-issue-element" data-index="${index}">Show Element</button>
+                            <button class="highlight-issue" data-index="${index}">Highlight</button>
+                        </div>
+                    `;
+                    
+                    this.issuesList.appendChild(issueItem);
+                    
+                    // Add event listeners
+                    const showButton = issueItem.querySelector('.show-issue-element');
+                    showButton.addEventListener('click', () => {
+                        const issueIndex = parseInt(showButton.dataset.index);
+                        this.showIssueElement(results[issueIndex]);
+                    });
+                    
+                    const highlightButton = issueItem.querySelector('.highlight-issue');
+                    highlightButton.addEventListener('click', () => {
+                        const issueIndex = parseInt(highlightButton.dataset.index);
+                        this.highlightIssueElement(results[issueIndex]);
+                    });
+                });
+            }
+            
+            createIssueAnnotations(results) {
+                // Clear previous annotations
+                this.clearAnnotations();
+                
+                // Create new annotations
+                results.forEach((issue, index) => {
+                    const element = issue.element;
+                    
+                    // Create annotation div
+                    const annotationDiv = document.createElement('div');
+                    annotationDiv.className = `annotation ${issue.severity}`;
+                    annotationDiv.textContent = (index + 1).toString();
+                    annotationDiv.dataset.index = index;
+                    
+                    // Create tooltip
+                    const tooltipDiv = document.createElement('div');
+                    tooltipDiv.className = 'tooltip';
+                    tooltipDiv.innerHTML = `
+                        <strong>${this.getRuleTitle(issue.ruleId)}</strong><br>
+                        ${issue.description}
+                    `;
+                    
+                    // Add event listeners
+                    annotationDiv.addEventListener('mouseenter', () => {
+                        tooltipDiv.style.display = 'block';
+                    });
+                    
+                    annotationDiv.addEventListener('mouseleave', () => {
+                        tooltipDiv.style.display = 'none';
+                    });
+                    
+                    annotationDiv.addEventListener('click', () => {
+                        this.showIssueElement(issue);
+                    });
+                    
+                    // Store reference to the element
+                    annotationDiv.userData = {
+                        element: element,
+                        issue: issue
+                    };
+                    
+                    // Add to document
+                    this.container.appendChild(annotationDiv);
+                    this.container.appendChild(tooltipDiv);
+                    
+                    // Store annotations
+                    this.annotations.push({
+                        div: annotationDiv,
+                        tooltip: tooltipDiv,
+                        element: element
+                    });
+                });
+                
+                // Position annotations
+                this.updateAnnotationsPositions();
+                
+                // Hide annotations initially
+                this.toggleAnnotations(false);
+            }
+            
+            updateAnnotationsPositions() {
+                // Update position of all annotations based on camera view
+                this.annotations.forEach(annotation => {
+                    const element = annotation.element;
+                    
+                    // Get element center
+                    const center = new THREE.Vector3();
+                    
+                    if (element.isGroup) {
+                        // For groups, calculate center from all children
+                        const bbox = new THREE.Box3().setFromObject(element);
+                        bbox.getCenter(center);
+                    } else {
+                        // For meshes, use position
+                        center.copy(element.position);
+                    }
+                    
+                    // Convert 3D position to screen coordinates
+                    const screenPosition = center.clone().project(this.camera);
+                    
+                    const x = (screenPosition.x * 0.5 + 0.5) * this.container.clientWidth;
+                    const y = (-screenPosition.y * 0.5 + 0.5) * this.container.clientHeight;
+                    
+                    // Check if the element is in front of the camera
+                    if (screenPosition.z < 1) {
+                        annotation.div.style.left = `${x}px`;
+                        annotation.div.style.top = `${y}px`;
+                        annotation.div.style.display = 'flex';
+                        
+                        // Position tooltip
+                        annotation.tooltip.style.left = `${x + 20}px`;
+                        annotation.tooltip.style.top = `${y}px`;
+                    } else {
+                        annotation.div.style.display = 'none';
+                        annotation.tooltip.style.display = 'none';
+                    }
+                });
+            }
+            
+            clearAnnotations() {
+                // Remove all annotations from DOM
+                this.annotations.forEach(annotation => {
+                    if (annotation.div.parentNode) {
+                        annotation.div.parentNode.removeChild(annotation.div);
+                    }
+                    
+                    if (annotation.tooltip.parentNode) {
+                        annotation.tooltip.parentNode.removeChild(annotation.tooltip);
+                    }
+                });
+                
+                this.annotations = [];
+                this.annotationsVisible = false;
+            }
+            
+            toggleAnnotations(show) {
+                this.annotations.forEach(annotation => {
+                    annotation.div.style.display = show ? 'flex' : 'none';
+                });
+                
+                this.annotationsVisible = show;
+            }
+            
+            showIssueElement(issue) {
+                const element = issue.element;
+                
+                // Highlight the element
+                this.highlightObject(element);
+                
+                // Create bounding box to position camera
+                const bbox = new THREE.Box3().setFromObject(element);
+                const center = bbox.getCenter(new THREE.Vector3());
+                
+                // Move camera to look at the element
+                this.controls.target.copy(center);
+                this.controls.update();
+                
+                // Display element properties
+                this.displayElementProperties(element);
+                
+                // Switch to properties panel
+                this.switchPanel('properties');
+            }
+            
+            highlightIssueElement(issue) {
+                const element = issue.element;
+                
+                // Highlight the element
+                this.highlightObject(element);
+                
+                // Create bounding box to position camera
+                const bbox = new THREE.Box3().setFromObject(element);
+                const center = bbox.getCenter(new THREE.Vector3());
+                
+                // Move camera to look at the element
+                this.controls.target.copy(center);
+                this.controls.update();
+            }
+            
+            highlightIssues() {
+                if (!this.ruleEngine.validationResults || this.ruleEngine.validationResults.length === 0) {
+                    alert('No fire safety check results available. Please run a check first.');
+                    return;
+                }
+                
+                // Reset all materials
+                Object.values(this.elements).forEach(element => {
+                    if (element.material) {
+                        if (Array.isArray(element.material)) {
+                            element.material.forEach(mat => {
+                                mat.color.set(0xcccccc);
+                                mat.opacity = 1;
+                                mat.transparent = false;
+                            });
+                        } else {
+                            element.material.color.set(0xcccccc);
+                            element.material.opacity = 1;
+                            element.material.transparent = false;
+                        }
+                    }
+                });
+                
+                // Highlight issues with different colors based on severity
+                const colors = {
+                    critical: 0xe74c3c,
+                    major: 0xf39c12,
+                    minor: 0x3498db
+                };
+                
+                // Make all elements semi-transparent
+                Object.values(this.elements).forEach(element => {
+                    if (element.material) {
+                        if (Array.isArray(element.material)) {
+                            element.material.forEach(mat => {
+                                mat.opacity = 0.3;
+                                mat.transparent = true;
+                            });
+                        } else {
+                            element.opacity = 0.3;
+                            element.transparent = true;
+                        }
+                    }
+                });
+                
+                // Highlight issue elements
+                this.ruleEngine.validationResults.forEach(result => {
+                    const element = result.element;
+                    const color = colors[result.severity];
+                    
+                    if (element.material) {
+                        if (Array.isArray(element.material)) {
+                            element.material.forEach(mat => {
+                                mat.color.set(color);
+                                mat.opacity = 1;
+                                mat.transparent = false;
+                            });
+                        } else {
+                            element.material.color.set(color);
+                            element.material.opacity = 1;
+                            element.material.transparent = false;
+                        }
+                    }
+                });
+                
+                // Show color legend
+                this.colorLegend.style.display = 'block';
+            }
+            
+            showAllElements() {
+                // Reset all materials
+                Object.values(this.elements).forEach(element => {
+                    const type = element.userData.type;
+                    let color = 0xcccccc; // Default color
+                    
+                    // Use different colors for different element types
+                    switch (type) {
+                        case 'wall':
+                            color = 0xcccccc;
+                            break;
+                        case 'floor':
+                            color = 0x999999;
+                            break;
+                        case 'ceiling':
+                            color = 0xdddddd;
+                            break;
+                        case 'door':
+                            color = 0x8b4513;
+                            break;
+                        case 'window':
+                            color = 0xadd8e6;
+                            break;
+                        case 'stairs':
+                            color = 0xaaaaaa;
+                            break;
+                        case 'roof':
+                            color = 0x8d6e63;
+                            break;
+                    }
+                    
+                    if (element.material) {
+                        if (Array.isArray(element.material)) {
+                            element.material.forEach(mat => {
+                                mat.color.set(color);
+                                mat.opacity = type === 'window' ? 0.6 : 1;
+                                mat.transparent = type === 'window';
+                            });
+                        } else {
+                            element.material.color.set(color);
+                            element.material.opacity = type === 'window' ? 0.6 : 1;
+                            element.material.transparent = type === 'window';
+                        }
+                    }
+                });
+                
+                // Hide color legend
+                this.colorLegend.style.display = 'none';
+            }
+            
+            switchPanel(panelId) {
+                // Update tab buttons
+                document.querySelectorAll('.panel-tab').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+                document.querySelector(`.panel-tab[data-panel="${panelId}"]`).classList.add('active');
+                
+                // Update panel content
+                document.querySelectorAll('.panel-content').forEach(panel => {
+                    panel.classList.remove('active');
+                });
+                document.getElementById(`${panelId}-panel`).classList.add('active');
+            }
+            
+            switchRuleSet(rulesetId) {
+                // Update tab buttons
+                document.querySelectorAll('.rule-tab').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+                document.querySelector(`.rule-tab[data-ruleset="${rulesetId}"]`).classList.add('active');
+                
+                // Update rule content
+                document.querySelectorAll('.rule-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                document.getElementById(`${rulesetId}-rules`).classList.add('active');
+            }
+            
+            filterIssues(filter) {
+                const issueItems = this.issuesList.querySelectorAll('.issue-item');
+                
+                issueItems.forEach(item => {
+                    if (filter === 'all' || 
+                        item.dataset.severity === filter || 
+                        item.dataset.elementType === filter) {
+                        item.style.display = 'block';
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
+            }
+            
+            showRulesDialog() {
+                // Populate rules content
+                this.populateRulesContent();
+                
+                // Show dialog
+                this.dialogOverlay.style.display = 'flex';
+            }
+            
+            populateRulesContent() {
+                // Populate dwelling rules
+                const dwellingRules = document.getElementById('dwelling-rules');
+                dwellingRules.innerHTML = '';
+                
+                // Group rules by category
+                const dwellingRulesByCategory = {};
+                this.ruleEngine.ruleCategories.forEach(category => {
+                    dwellingRulesByCategory[category.id] = this.ruleEngine.ruleSets.dwelling.filter(rule => 
+                        rule.category === category.id
+                    );
+                });
+                
+                // Create rule categories
+                this.ruleEngine.ruleCategories.forEach(category => {
+                    if (dwellingRulesByCategory[category.id].length > 0) {
+                        const categoryDiv = document.createElement('div');
+                        categoryDiv.className = 'rule-category';
+                        
+                        categoryDiv.innerHTML = `
+                            <div class="rule-category-title">
+                                ${category.name}
+                                <div class="rule-count">${dwellingRulesByCategory[category.id].length}</div>
+                            </div>
+                        `;
+                        
+                        // Add rules
+                        dwellingRulesByCategory[category.id].forEach(rule => {
+                            const ruleItem = document.createElement('div');
+                            ruleItem.className = 'rule-item';
+                            
+                            ruleItem.innerHTML = `
+                                <div class="rule-header">
+                                    <div class="rule-title">${rule.title}</div>
+                                    <div class="rule-severity ${rule.severity}">${rule.severity.charAt(0).toUpperCase() + rule.severity.slice(1)}</div>
+                                </div>
+                                <div class="rule-description">${rule.description}</div>
+                                <div class="rule-regulation">${rule.regulation}</div>
+                            `;
+                            
+                            categoryDiv.appendChild(ruleItem);
+                        });
+                        
+                        dwellingRules.appendChild(categoryDiv);
+                    }
+                });
+                
+                // Populate non-dwelling rules
+                const nonDwellingRules = document.getElementById('non-dwelling-rules');
+                nonDwellingRules.innerHTML = '';
+                
+                // Group rules by category
+                const nonDwellingRulesByCategory = {};
+                this.ruleEngine.ruleCategories.forEach(category => {
+                    nonDwellingRulesByCategory[category.id] = this.ruleEngine.ruleSets.office.filter(rule => 
+                        rule.category === category.id
+                    );
+                });
+                
+                // Create rule categories
+                this.ruleEngine.ruleCategories.forEach(category => {
+                    if (nonDwellingRulesByCategory[category.id].length > 0) {
+                        const categoryDiv = document.createElement('div');
+                        categoryDiv.className = 'rule-category';
+                        
+                        categoryDiv.innerHTML = `
+                            <div class="rule-category-title">
+                                ${category.name}
+                                <div class="rule-count">${nonDwellingRulesByCategory[category.id].length}</div>
+                            </div>
+                        `;
+                        
+                        // Add rules
+                        nonDwellingRulesByCategory[category.id].forEach(rule => {
+                            const ruleItem = document.createElement('div');
+                            ruleItem.className = 'rule-item';
+                            
+                            ruleItem.innerHTML = `
+                                <div class="rule-header">
+                                    <div class="rule-title">${rule.title}</div>
+                                    <div class="rule-severity ${rule.severity}">${rule.severity.charAt(0).toUpperCase() + rule.severity.slice(1)}</div>
+                                </div>
+                                <div class="rule-description">${rule.description}</div>
+                                <div class="rule-regulation">${rule.regulation}</div>
+                            `;
+                            
+                            categoryDiv.appendChild(ruleItem);
+                        });
+                        
+                        nonDwellingRules.appendChild(categoryDiv);
+                    }
+                });
+            }
+            
+            updateReportPanel() {
+                // Update compliance percentages
+                const compliancePercentage = this.ruleEngine.getCompliancePercentage();
+                document.getElementById('compliance-percentage').textContent = `${compliancePercentage}%`;
+                document.getElementById('compliance-bar').style.width = `${compliancePercentage}%`;
+                
+                // Update summary
+                document.getElementById('last-check-date').textContent = new Date().toLocaleString();
+                document.getElementById('total-issues-count').textContent = this.ruleEngine.validationResults.length;
+                document.getElementById('report-critical-count').textContent = this.ruleEngine.resultsBySeverity.critical.length;
+                document.getElementById('compliance-status').textContent = this.ruleEngine.getComplianceStatus();
+                
+                // Update category compliance
+                const categoryContainer = document.getElementById('category-progress-container');
+                categoryContainer.innerHTML = '';
+                
+                this.ruleEngine.ruleCategories.forEach(category => {
+                    const compliance = this.ruleEngine.getCategoryCompliance(category.id);
+                    
+                    const categoryDiv = document.createElement('div');
+                    categoryDiv.className = 'progress-container';
+                    
+                    categoryDiv.innerHTML = `
+                        <div class="progress-title">
+                            <div class="progress-label">${category.name}</div>
+                            <div class="progress-percentage">${compliance}%</div>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-value" style="width: ${compliance}%"></div>
+                        </div>
+                    `;
+                    
+                    categoryContainer.appendChild(categoryDiv);
+                });
+            }
+            
+            updateBuildingInfo() {
+                this.buildingInfo = {
+                    name: document.getElementById('building-name').value,
+                    address: document.getElementById('building-address').value,
+                    floorArea: parseFloat(document.getElementById('building-floor-area').value),
+                    height: parseFloat(document.getElementById('building-height').value),
+                    occupancy: parseInt(document.getElementById('building-occupancy').value),
+                    hasSprinklers: false, // Add UI for this later
+                    buildingType: this.buildingTypeSelect.value
+                };
+            }
+            
+            exportReport(format) {
+                if (!this.ruleEngine.validationResults || this.ruleEngine.validationResults.length === 0) {
+                    alert('No fire safety check results available. Please run a check first.');
+                    return;
+                }
+                
+                if (format === 'pdf') {
+                    this.exportPDFReport();
+                } else if (format === 'csv') {
+                    this.exportCSVReport();
+                }
+            }
+            
+            exportPDFReport() {
+                // Check if jsPDF is available
+                if (typeof jspdf === 'undefined' || typeof jspdf.jsPDF === 'undefined') {
+                    alert('PDF export library not available. Please check your internet connection.');
+                    return;
+                }
+                
+                const { jsPDF } = jspdf;
+                const { autoTable } = jspdf.autoTable;
+                
+                // Create a new PDF document
+                const doc = new jsPDF();
+                
+                // Add title and building info
+                doc.setFontSize(20);
+                doc.text('Fire Safety Compliance Report', 14, 20);
+                
+                doc.setFontSize(12);
+                doc.text(`Building: ${this.buildingInfo.name}`, 14, 30);
+                doc.text(`Address: ${this.buildingInfo.address}`, 14, 36);
+                doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, 42);
+                
+                // Add compliance summary
+                doc.setFontSize(16);
+                doc.text('Compliance Summary', 14, 52);
+                
+                doc.setFontSize(12);
+                doc.text(`Overall Compliance: ${this.ruleEngine.getCompliancePercentage()}%`, 14, 60);
+                doc.text(`Status: ${this.ruleEngine.getComplianceStatus()}`, 14, 66);
+                doc.text(`Total Issues: ${this.ruleEngine.validationResults.length}`, 14, 72);
+                doc.text(`Critical Issues: ${this.ruleEngine.resultsBySeverity.critical.length}`, 14, 78);
+                doc.text(`Major Issues: ${this.ruleEngine.resultsBySeverity.major.length}`, 14, 84);
+                doc.text(`Minor Issues: ${this.ruleEngine.resultsBySeverity.minor.length}`, 14, 90);
+                
+                // Add issues table
+                doc.setFontSize(16);
+                doc.text('Issues Found', 14, 100);
+                
+                // Prepare table data
+                const tableData = this.ruleEngine.validationResults.map(issue => {
+                    const rule = this.ruleEngine.getActiveRules().find(r => r.id === issue.ruleId);
+                    return [
+                        rule ? rule.title : 'Unknown Issue',
+                        issue.severity.charAt(0).toUpperCase() + issue.severity.slice(1),
+                        issue.element.userData.name,
+                        issue.description
+                    ];
+                });
+                
+                // Add the table
+                autoTable(doc, {
+                    startY: 105,
+                    head: [['Issue', 'Severity', 'Element', 'Description']],
+                    body: tableData,
+                    headStyles: {
+                        fillColor: [44, 62, 80],
+                        textColor: 255
+                    },
+                    styles: {
+                        overflow: 'ellipsize',
+                        cellWidth: 'wrap'
+                    },
+                    columnStyles: {
+                        0: { cellWidth: 40 },
+                        1: { cellWidth: 25 },
+                        2: { cellWidth: 30 },
+                        3: { cellWidth: 'auto' }
+                    }
+                });
+                
+                // Save the PDF
+                doc.save(`${this.buildingInfo.name.replace(/\s+/g, '_')}_Fire_Safety_Report.pdf`);
+            }
+            
+            exportCSVReport() {
+                if (!this.ruleEngine.validationResults || this.ruleEngine.validationResults.length === 0) {
+                    alert('No fire safety check results available. Please run a check first.');
+                    return;
+                }
+                
+                // Prepare CSV content
+                let csv = 'Issue,Severity,Element,Description,Regulation\n';
+                
+                this.ruleEngine.validationResults.forEach(issue => {
+                    const rule = this.ruleEngine.getActiveRules().find(r => r.id === issue.ruleId);
+                    
+                    // Escape CSV values
+                    const escapeCsv = (value) => {
+                        return `"${value.replace(/"/g, '""')}"`;
+                    };
+                    
+                    csv += [
+                        escapeCsv(rule ? rule.title : 'Unknown Issue'),
+                        escapeCsv(issue.severity),
+                        escapeCsv(issue.element.userData.name),
+                        escapeCsv(issue.description),
+                        escapeCsv(rule ? rule.regulation : '')
+                    ].join(',') + '\n';
+                });
+                
+                // Create a download link
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                
+                // Create a URL for the blob
+                const url = URL.createObjectURL(blob);
+                link.setAttribute('href', url);
+                link.setAttribute('download', `${this.buildingInfo.name.replace(/\s+/g, '_')}_Fire_Safety_Issues.csv`);
+                
+                // Append to body, click, and remove
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+            
+            generateDetailedPDFReport() {
+                alert('Generating detailed PDF report... This feature would create a comprehensive report with graphics, floor plans, and detailed compliance analysis.');
+                
+                // In a real implementation, this would generate a more sophisticated report
+                // with floor plans, graphics, and detailed analysis
+            }
+            
+            clearModel() {
+                // Remove current model
+                if (this.model) {
+                    this.scene.remove(this.model);
+                    this.model = null;
+                }
+                
+                // Clear elements data
+                this.elements = {};
+                
+                // Clear any validation results
+                this.ruleEngine.validationResults = [];
+                
+                // Reset UI
+                this.elementInfo.textContent = 'No element selected';
+                this.propertyContent.style.display = 'none';
+                this.noSelection.style.display = 'flex';
+                this.issuesList.innerHTML = '';
+                document.getElementById('critical-count').textContent = '0';
+                document.getElementById('major-count').textContent = '0';
+                document.getElementById('minor-count').textContent = '0';
+                
+                // Clear annotations
+                this.clearAnnotations();
+            }
+            
+            showLoading(message) {
+                this.loadingStatus.textContent = message;
+                this.loadingScreen.style.display = 'flex';
+            }
+            
+            hideLoading() {
+                this.loadingScreen.style.display = 'none';
+            }
+        }
+        
+        // CSS2DObject for labels (simplified version since we don't have the library)
+        class CSS2DObject extends THREE.Object3D {
+            constructor(element) {
+                super();
+                
+                this.element = element;
+                this.element.style.position = 'absolute';
+                this.element.style.pointerEvents = 'none';
+                
+                this.update = () => {
+                    if (this.parent) {
+                        const vector = new THREE.Vector3();
+                        vector.setFromMatrixPosition(this.matrixWorld);
+                        
+                        const width = window.innerWidth;
+                        const height = window.innerHeight;
+                        
+                        vector.project(this.parent);
+                        
+                        vector.x = (vector.x + 1) / 2 * width;
+                        vector.y = -(vector.y - 1) / 2 * height;
+                        
+                        this.element.style.left = vector.x + 'px';
+                        this.element.style.top = vector.y + 'px';
+                    }
+                };
+                
+                this.update();
+            }
+        }
+        
+        // Initialize the application when the DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            // Create the viewer
+            const viewer = new IFCViewer();
+        });
+    </script>
+</body>
+</html>
