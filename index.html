@@ -2997,4 +2997,258 @@
                 });
                 
                 // Left wall
-                const leftWall
+const leftWallGroundGeometry = new THREE.BoxGeometry(wallThickness, floorHeight, houseDepth);
+const leftWallGround = new THREE.Mesh(leftWallGroundGeometry, materials.wall);
+leftWallGround.position.set(-houseWidth/2, floorHeight/2, 0);
+this.model.add(leftWallGround);
+this.addElementData(leftWallGround, 'wall', 'Wall_Left_Ground', {
+    'Material': 'Brick + Block Cavity',
+    'Thickness': '300mm',
+    'Fire Rating': '60 minutes',
+    'External': 'Yes',
+    'Distance to Boundary': '3m',
+    'Level': 'Ground Floor'
+});
+
+// Right wall
+const rightWallGroundGeometry = new THREE.BoxGeometry(wallThickness, floorHeight, houseDepth);
+const rightWallGround = new THREE.Mesh(rightWallGroundGeometry, materials.wall);
+rightWallGround.position.set(houseWidth/2, floorHeight/2, 0);
+this.model.add(rightWallGround);
+this.addElementData(rightWallGround, 'wall', 'Wall_Right_Ground', {
+    'Material': 'Brick + Block Cavity',
+    'Thickness': '300mm',
+    'Fire Rating': '60 minutes',
+    'External': 'Yes',
+    'Distance to Boundary': '0.5m', // Close to boundary, needs high fire rating
+    'Level': 'Ground Floor'
+});
+
+// Create external walls - first floor
+// Front wall
+const frontWallFirstGeometry = new THREE.BoxGeometry(houseWidth, floorHeight, wallThickness);
+const frontWallFirst = new THREE.Mesh(frontWallFirstGeometry, materials.wall);
+frontWallFirst.position.set(0, floorHeight + floorHeight/2, houseDepth/2);
+this.model.add(frontWallFirst);
+this.addElementData(frontWallFirst, 'wall', 'Wall_Front_First', {
+    'Material': 'Brick + Block Cavity',
+    'Thickness': '300mm',
+    'Fire Rating': '60 minutes',
+    'External': 'Yes',
+    'Distance to Boundary': '5m',
+    'Level': 'First Floor'
+});
+
+// Back wall
+const backWallFirstGeometry = new THREE.BoxGeometry(houseWidth, floorHeight, wallThickness);
+const backWallFirst = new THREE.Mesh(backWallFirstGeometry, materials.wall);
+backWallFirst.position.set(0, floorHeight + floorHeight/2, -houseDepth/2);
+this.model.add(backWallFirst);
+this.addElementData(backWallFirst, 'wall', 'Wall_Back_First', {
+    'Material': 'Brick + Block Cavity',
+    'Thickness': '300mm',
+    'Fire Rating': '60 minutes',
+    'External': 'Yes',
+    'Distance to Boundary': '10m',
+    'Level': 'First Floor'
+});
+
+// Left wall
+const leftWallFirstGeometry = new THREE.BoxGeometry(wallThickness, floorHeight, houseDepth);
+const leftWallFirst = new THREE.Mesh(leftWallFirstGeometry, materials.wall);
+leftWallFirst.position.set(-houseWidth/2, floorHeight + floorHeight/2, 0);
+this.model.add(leftWallFirst);
+this.addElementData(leftWallFirst, 'wall', 'Wall_Left_First', {
+    'Material': 'Brick + Block Cavity',
+    'Thickness': '300mm',
+    'Fire Rating': '60 minutes',
+    'External': 'Yes',
+    'Distance to Boundary': '3m',
+    'Level': 'First Floor'
+});
+
+// Right wall
+const rightWallFirstGeometry = new THREE.BoxGeometry(wallThickness, floorHeight, houseDepth);
+const rightWallFirst = new THREE.Mesh(rightWallFirstGeometry, materials.wall);
+rightWallFirst.position.set(houseWidth/2, floorHeight + floorHeight/2, 0);
+this.model.add(rightWallFirst);
+this.addElementData(rightWallFirst, 'wall', 'Wall_Right_First', {
+    'Material': 'Brick + Block Cavity',
+    'Thickness': '300mm',
+    'Fire Rating': '60 minutes',
+    'External': 'Yes',
+    'Distance to Boundary': '0.5m',
+    'Level': 'First Floor'
+});
+
+// Create internal walls - ground floor
+// Kitchen-living dividing wall
+const kitchenWallGeometry = new THREE.BoxGeometry(houseWidth/2, floorHeight, wallThickness);
+const kitchenWall = new THREE.Mesh(kitchenWallGeometry, materials.wall);
+kitchenWall.position.set(-houseWidth/4, floorHeight/2, 0);
+this.model.add(kitchenWall);
+this.addElementData(kitchenWall, 'wall', 'Wall_Kitchen_Divider', {
+    'Material': 'Blockwork',
+    'Thickness': '100mm',
+    'Fire Rating': '30 minutes',
+    'External': 'No',
+    'Level': 'Ground Floor',
+    'Purpose': 'Room Divider'
+});
+
+// Hallway wall
+const hallwayWallGeometry = new THREE.BoxGeometry(wallThickness, floorHeight, houseDepth/2);
+const hallwayWall = new THREE.Mesh(hallwayWallGeometry, materials.wall);
+hallwayWall.position.set(houseWidth/4, floorHeight/2, houseDepth/4);
+this.model.add(hallwayWall);
+this.addElementData(hallwayWall, 'wall', 'Wall_Hallway', {
+    'Material': 'Studwork + Plasterboard',
+    'Thickness': '100mm',
+    'Fire Rating': '15 minutes', // Non-compliant
+    'External': 'No',
+    'Level': 'Ground Floor',
+    'Purpose': 'Hallway'
+});
+
+// Doors - ground floor
+// Main entrance door
+const entranceDoorGeometry = new THREE.BoxGeometry(1, 2.1, 0.05);
+const entranceDoor = new THREE.Mesh(entranceDoorGeometry, materials.door);
+entranceDoor.position.set(0, floorHeight/2 - 0.45, houseDepth/2 - wallThickness/2);
+this.model.add(entranceDoor);
+this.addElementData(entranceDoor, 'door', 'Door_Main_Entrance', {
+    'Material': 'Solid Wood',
+    'Width': '1000mm',
+    'Height': '2100mm',
+    'Fire Rating': '30 minutes',
+    'Self-Closing': 'No',
+    'Direction': 'Inward',
+    'Level': 'Ground Floor'
+});
+
+// Kitchen door
+const kitchenDoorGeometry = new THREE.BoxGeometry(0.8, 2.1, 0.05);
+const kitchenDoor = new THREE.Mesh(kitchenDoorGeometry, materials.door);
+kitchenDoor.position.set(-houseWidth/4, floorHeight/2 - 0.45, -1);
+this.model.add(kitchenDoor);
+this.addElementData(kitchenDoor, 'door', 'Door_Kitchen', {
+    'Material': 'Hollow Core',
+    'Width': '800mm',
+    'Height': '2100mm',
+    'Fire Rating': '0 minutes', // Non-compliant
+    'Self-Closing': 'No',
+    'Direction': 'Outward',
+    'Level': 'Ground Floor'
+});
+
+// Windows - ground floor
+// Living room window
+const livingWindowGeometry = new THREE.BoxGeometry(3, 1.2, 0.1);
+const livingWindow = new THREE.Mesh(livingWindowGeometry, materials.window);
+livingWindow.position.set(2, floorHeight/2 + 0.6, houseDepth/2 - wallThickness/2);
+this.model.add(livingWindow);
+this.addElementData(livingWindow, 'window', 'Window_Living_Room', {
+    'Type': 'Double Glazed',
+    'Width': '3000mm',
+    'Height': '1200mm',
+    'Fire Rating': '0 minutes',
+    'Openable': 'Yes',
+    'Opening Area': '0.5 sq.m',
+    'Level': 'Ground Floor'
+});
+
+// Kitchen window
+const kitchenWindowGeometry = new THREE.BoxGeometry(2, 1.2, 0.1);
+const kitchenWindow = new THREE.Mesh(kitchenWindowGeometry, materials.window);
+kitchenWindow.position.set(-3, floorHeight/2 + 0.6, -houseDepth/2 + wallThickness/2);
+this.model.add(kitchenWindow);
+this.addElementData(kitchenWindow, 'window', 'Window_Kitchen', {
+    'Type': 'Double Glazed',
+    'Width': '2000mm',
+    'Height': '1200mm',
+    'Fire Rating': '0 minutes',
+    'Openable': 'Yes',
+    'Opening Area': '0.4 sq.m',
+    'Level': 'Ground Floor'
+});
+
+// Windows - first floor
+// Bedroom 1 window
+const bedroom1WindowGeometry = new THREE.BoxGeometry(1.5, 1.2, 0.1);
+const bedroom1Window = new THREE.Mesh(bedroom1WindowGeometry, materials.window);
+bedroom1Window.position.set(-3, floorHeight + floorHeight/2 + 0.6, houseDepth/2 - wallThickness/2);
+this.model.add(bedroom1Window);
+this.addElementData(bedroom1Window, 'window', 'Window_Bedroom_1', {
+    'Type': 'Double Glazed',
+    'Width': '1500mm',
+    'Height': '1200mm',
+    'Fire Rating': '0 minutes',
+    'Openable': 'Yes',
+    'Opening Area': '0.45 sq.m',
+    'Level': 'First Floor'
+});
+
+// Bedroom 2 window
+const bedroom2WindowGeometry = new THREE.BoxGeometry(1.5, 1.2, 0.1);
+const bedroom2Window = new THREE.Mesh(bedroom2WindowGeometry, materials.window);
+bedroom2Window.position.set(3, floorHeight + floorHeight/2 + 0.6, houseDepth/2 - wallThickness/2);
+this.model.add(bedroom2Window);
+this.addElementData(bedroom2Window, 'window', 'Window_Bedroom_2', {
+    'Type': 'Double Glazed',
+    'Width': '1500mm',
+    'Height': '1200mm',
+    'Fire Rating': '0 minutes',
+    'Openable': 'Yes',
+    'Opening Area': '0.3 sq.m', // Non-compliant for escape window
+    'Level': 'First Floor'
+});
+
+// Add a roof
+const roofGeometry = new THREE.ConeGeometry(houseWidth/2 * 1.2, 3, 4);
+roofGeometry.rotateY(Math.PI/4);
+const roof = new THREE.Mesh(roofGeometry, materials.roof);
+roof.position.set(0, floorHeight*2 + 1.5, 0);
+this.model.add(roof);
+this.addElementData(roof, 'roof', 'Roof_Main', {
+    'Material': 'Concrete Tiles',
+    'Construction': 'Timber Truss',
+    'Insulation': 'Mineral Wool',
+    'Fire Rating': '30 minutes'
+});
+
+// Add stairs
+const stairsGroup = new THREE.Group();
+stairsGroup.position.set(2, 0, 2);
+
+// Create stairs steps
+for (let i = 0; i < 15; i++) {
+    const stepGeometry = new THREE.BoxGeometry(1, 0.17, 0.25);
+    const step = new THREE.Mesh(stepGeometry, materials.stairs);
+    step.position.set(0, i * 0.2, i * -0.25);
+    stairsGroup.add(step);
+}
+
+this.model.add(stairsGroup);
+this.addElementData(stairsGroup, 'stairs', 'Stairs_Main', {
+    'Material': 'Timber',
+    'Width': '1000mm',
+    'Riser': '170mm',
+    'Tread': '250mm',
+    'Fire Rating': '0 minutes', // Non-compliant
+    'Handrail': 'Yes'
+});
+
+// Add the model to the scene
+this.scene.add(this.model);
+
+// Update model stats
+this.modelStats.textContent = `Model: Example Dwelling | Elements: ${Object.keys(this.elements).length}`;
+
+// Reset view to show the entire model
+this.resetView();
+
+// Hide no model message
+this.noModel.style.display = 'none';
+
+// Hide loading screen
+this.hideLoading();
