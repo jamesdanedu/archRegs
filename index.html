@@ -3252,3 +3252,1294 @@ this.noModel.style.display = 'none';
 
 // Hide loading screen
 this.hideLoading();
+getRuleRegulation(ruleId) {
+                const rule = this.ruleEngine.getActiveRules().find(r => r.id === ruleId);
+                return rule ? rule.regulation : 'Unknown Regulation';
+            }
+            
+            highlightObject(mesh) {
+                // Reset previous highlight
+                this.clearHighlight();
+                
+                // Store the original material
+                mesh.userData.originalMaterial = mesh.material;
+                
+                // Create highlight material
+                const highlightMaterial = new THREE.MeshPhongMaterial({ 
+                    color: 0x3498db, 
+                    emissive: 0x2980b9, 
+                    transparent: true,
+                    opacity: 0.8
+                });
+                
+                // Apply highlight material
+                mesh.material = highlightMaterial;
+                
+                // Store selected element
+                this.selectedElement = mesh;
+            }
+            
+            clearHighlight() {
+                // If there's a selected element, restore its original material
+                if (this.selectedElement && this.selectedElement.userData.originalMaterial) {
+                    this.selectedElement.material = this.selectedElement.userData.originalMaterial;
+                    delete this.selectedElement.userData.originalMaterial;
+                    this.selectedElement = null;
+                }
+            }
+            
+            resetView() {
+                if (!this.model) return;
+                
+                // Calculate bounding box of the model
+                const box = new THREE.Box3().setFromObject(this.model);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                
+                // Calculate distance based on size
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const fov = this.camera.fov * (Math.PI / 180);
+                let distance = maxDim / (2 * Math.tan(fov / 2));
+                
+                // Add some margin
+                distance *= 1.5;
+                
+                // Set camera position
+                this.camera.position.set(center.x + distance, center.y + distance * 0.8, center.z + distance);
+                this.camera.lookAt(center);
+                
+                // Update controls target
+                this.controls.target.copy(center);
+                this.controls.update();
+            }
+            
+            toggleSectionPlane() {
+                if (this.sectionPlaneActive) {
+                    // Remove section plane
+                    if (this.sectionPlane) {
+                        this.scene.remove(this.sectionPlane);
+                        this.sectionPlane = null;
+                    }
+                    
+                    // Disable clipping
+                    this.renderer.localClippingEnabled = false;
+                    
+                    // Update button
+                    document.getElementById('section-plane').classList.remove('toggle-active');
+                    
+                    this.sectionPlaneActive = false;
+                } else {
+                    // Create section plane if not exists
+                    if (!this.clippingPlane) {
+                        this.clippingPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+                    }
+                    
+                    // Enable clipping
+                    this.renderer.localClippingEnabled = true;
+                    
+                    // Update all materials to use clipping plane
+                    this.model.traverse(child => {
+                        if (child.isMesh && child.material) {
+                            if (Array.isArray(child.material)) {
+                                child.material.forEach(mat => {
+                                    mat.clippingPlanes = [this.clippingPlane];
+                                });
+                            } else {
+                                child.material.clippingPlanes = [this.clippingPlane];
+                            }
+                        }
+                    });
+                    
+                    // Visualize section plane
+                    const planeGeometry = new THREE.PlaneGeometry(50, 50);
+                    const planeMaterial = new THREE.MeshBasicMaterial({ 
+                        color: 0x3498db, 
+                        side: THREE.DoubleSide,
+                        transparent: true,
+                        opacity: 0.2
+                    });
+                    
+                    this.sectionPlane = new THREE.Mesh(planeGeometry, planeMaterial);
+                    this.sectionPlane.position.set(0, 0, 0);
+                    this.scene.add(this.sectionPlane);
+                    
+                    // Update button
+                    document.getElementById('section-plane').classList.add('toggle-active');
+                    
+                    this.sectionPlaneActive = true;
+                }
+            }
+            
+            setMeasurementTool(tool) {
+                // Reset current measurement
+                this.clearMeasurements();
+                
+                // Set active tool
+                this.activeMeasurementTool = tool;
+                
+                // Update UI
+                document.querySelectorAll('.measurement-button').forEach(button => {
+                    button.classList.remove('active');
+                });
+                document.getElementById(`${tool}-tool`).classList.add('active');
+                
+                // Update measurement info
+                let instructionText = '';
+                switch (tool) {
+                    case 'distance':
+                        instructionText = 'Click to set start point, click again to set end point';
+                        break;
+                    case 'area':
+                        instructionText = 'Click to set points for area measurement (min 3 points). Double-click to finish';
+                        break;
+                    case 'angle':
+                        instructionText = 'Click to set 3 points for angle measurement';
+                        break;
+                }
+                
+                this.measurementInfo.textContent = instructionText;
+                this.measurementInfo.classList.add('active');
+            }
+            
+            handleMeasurementClick() {
+                if (!this.activeMeasurementTool) return;
+                
+                // Get intersection point with model
+                this.raycaster.setFromCamera(this.mouse, this.camera);
+                
+                // Get all meshes from the model
+                const meshes = [];
+                this.model.traverse(child => {
+                    if (child.isMesh) {
+                        meshes.push(child);
+                    }
+                });
+                
+                const intersects = this.raycaster.intersectObjects(meshes);
+                
+                if (intersects.length > 0) {
+                    const point = intersects[0].point;
+                    
+                    // Add point to measurement
+                    this.measurementPoints.push(point);
+                    
+                    // Create marker for point
+                    const markerGeometry = new THREE.SphereGeometry(0.05, 16, 16);
+                    const markerMaterial = new THREE.MeshBasicMaterial({ color: 0x3498db });
+                    const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+                    marker.position.copy(point);
+                    this.scene.add(marker);
+                    this.measurementObjects.push(marker);
+                    
+                    // Handle based on tool type and number of points
+                    if (this.activeMeasurementTool === 'distance' && this.measurementPoints.length === 2) {
+                        this.createDistanceMeasurement();
+                    } else if (this.activeMeasurementTool === 'angle' && this.measurementPoints.length === 3) {
+                        this.createAngleMeasurement();
+                    } else if (this.activeMeasurementTool === 'area' && this.measurementPoints.length >= 3) {
+                        this.createAreaMeasurement();
+                    }
+                }
+            }
+            
+            createDistanceMeasurement() {
+                const start = this.measurementPoints[0];
+                const end = this.measurementPoints[1];
+                
+                // Create line
+                const lineGeometry = new THREE.BufferGeometry().setFromPoints([start, end]);
+                const lineMaterial = new THREE.LineBasicMaterial({ color: 0x3498db, linewidth: 2 });
+                const line = new THREE.Line(lineGeometry, lineMaterial);
+                this.scene.add(line);
+                this.measurementObjects.push(line);
+                
+                // Calculate distance
+                const distance = start.distanceTo(end);
+                
+                // Create label
+                const midPoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'measurement-label';
+                labelDiv.textContent = `${distance.toFixed(2)} m`;
+                
+                // Position label at midpoint
+                const labelObject = new THREE.CSS2DObject(labelDiv);
+                labelObject.position.copy(midPoint);
+                this.scene.add(labelObject);
+                this.measurementObjects.push(labelObject);
+                
+                // Reset points for next measurement
+                this.measurementPoints = [];
+            }
+            
+            createAngleMeasurement() {
+                const p1 = this.measurementPoints[0];
+                const p2 = this.measurementPoints[1];
+                const p3 = this.measurementPoints[2];
+                
+                // Create lines
+                const line1Geometry = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+                const line2Geometry = new THREE.BufferGeometry().setFromPoints([p2, p3]);
+                const lineMaterial = new THREE.LineBasicMaterial({ color: 0x3498db, linewidth: 2 });
+                const line1 = new THREE.Line(line1Geometry, lineMaterial);
+                const line2 = new THREE.Line(line2Geometry, lineMaterial);
+                this.scene.add(line1);
+                this.scene.add(line2);
+                this.measurementObjects.push(line1, line2);
+                
+                // Calculate angle
+                const v1 = new THREE.Vector3().subVectors(p1, p2).normalize();
+                const v2 = new THREE.Vector3().subVectors(p3, p2).normalize();
+                const angle = Math.acos(v1.dot(v2)) * (180 / Math.PI);
+                
+                // Create label
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'measurement-label';
+                labelDiv.textContent = `${angle.toFixed(1)}°`;
+                
+                // Position label at vertex
+                const labelObject = new THREE.CSS2DObject(labelDiv);
+                labelObject.position.copy(p2);
+                this.scene.add(labelObject);
+                this.measurementObjects.push(labelObject);
+                
+                // Reset points for next measurement
+                this.measurementPoints = [];
+            }
+            
+            createAreaMeasurement() {
+                // Need at least 3 points for area
+                if (this.measurementPoints.length < 3) return;
+                
+                // Create polygon shape
+                const shape = new THREE.Shape();
+                shape.moveTo(this.measurementPoints[0].x, this.measurementPoints[0].z);
+                
+                for (let i = 1; i < this.measurementPoints.length; i++) {
+                    shape.lineTo(this.measurementPoints[i].x, this.measurementPoints[i].z);
+                }
+                
+                shape.lineTo(this.measurementPoints[0].x, this.measurementPoints[0].z);
+                
+                // Create lines connecting points
+                for (let i = 0; i < this.measurementPoints.length; i++) {
+                    const start = this.measurementPoints[i];
+                    const end = this.measurementPoints[(i + 1) % this.measurementPoints.length];
+                    
+                    const lineGeometry = new THREE.BufferGeometry().setFromPoints([start, end]);
+                    const lineMaterial = new THREE.LineBasicMaterial({ color: 0x3498db, linewidth: 2 });
+                    const line = new THREE.Line(lineGeometry, lineMaterial);
+                    this.scene.add(line);
+                    this.measurementObjects.push(line);
+                }
+                
+                // Calculate area (assuming points are on a horizontal plane)
+                let area = 0;
+                for (let i = 0; i < this.measurementPoints.length; i++) {
+                    const j = (i + 1) % this.measurementPoints.length;
+                    area += this.measurementPoints[i].x * this.measurementPoints[j].z;
+                    area -= this.measurementPoints[j].x * this.measurementPoints[i].z;
+                }
+                area = Math.abs(area) / 2;
+                
+                // Calculate centroid
+                const centroid = new THREE.Vector3();
+                for (const point of this.measurementPoints) {
+                    centroid.add(point);
+                }
+                centroid.divideScalar(this.measurementPoints.length);
+                
+                // Create label
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'measurement-label';
+                labelDiv.textContent = `${area.toFixed(2)} m²`;
+                
+                // Position label at centroid
+                const labelObject = new THREE.CSS2DObject(labelDiv);
+                labelObject.position.copy(centroid);
+                this.scene.add(labelObject);
+                this.measurementObjects.push(labelObject);
+                
+                // Reset points for next measurement
+                this.measurementPoints = [];
+            }
+            
+            clearMeasurements() {
+                // Remove all measurement objects from the scene
+                for (const obj of this.measurementObjects) {
+                    this.scene.remove(obj);
+                }
+                
+                // Clear arrays
+                this.measurementObjects = [];
+                this.measurementPoints = [];
+                
+                // Hide measurement info
+                this.measurementInfo.classList.remove('active');
+            }
+            
+            runFireSafetyCheck() {
+                this.showLoading('Running fire safety checks...');
+                
+                // Update building info from form
+                this.updateBuildingInfo();
+                
+                // Run validation
+                setTimeout(() => {
+                    const results = this.ruleEngine.validateModel(this.elements, this.buildingInfo);
+                    
+                    // Update UI with results
+                    this.updateValidationResults(results);
+                    
+                    // Create annotations for issues
+                    this.createAnnotations(results);
+                    
+                    // Show annotations
+                    this.toggleAnnotations(true);
+                    
+                    // Switch to issues panel
+                    this.switchPanel('issues');
+                    
+                    this.hideLoading();
+                }, 500);
+            }
+            
+            updateValidationResults(results) {
+                // Clear existing issues
+                this.issuesList.innerHTML = '';
+                
+                // Update issue counts
+                document.getElementById('critical-count').textContent = this.ruleEngine.resultsBySeverity.critical.length;
+                document.getElementById('major-count').textContent = this.ruleEngine.resultsBySeverity.major.length;
+                document.getElementById('minor-count').textContent = this.ruleEngine.resultsBySeverity.minor.length;
+                
+                // Create issue items
+                results.forEach(issue => {
+                    const issueElement = document.createElement('div');
+                    issueElement.className = `issue-item ${issue.severity}`;
+                    
+                    const rule = this.ruleEngine.getActiveRules().find(r => r.id === issue.ruleId);
+                    
+                    issueElement.innerHTML = `
+                        <div class="issue-header">
+                            <div class="issue-title">${rule ? rule.title : 'Unknown Rule'}</div>
+                            <div class="issue-severity ${issue.severity}">${issue.severity.charAt(0).toUpperCase() + issue.severity.slice(1)}</div>
+                        </div>
+                        <div class="issue-element">${issue.element.userData.name}</div>
+                        <div class="issue-description">${issue.description}</div>
+                        <div class="issue-regulation">${rule ? rule.regulation : ''}</div>
+                        <div class="issue-actions">
+                            <button class="zoom-issue" data-id="${issue.element.userData.id}">Zoom</button>
+                            <button class="highlight-issue" data-id="${issue.element.userData.id}">Highlight</button>
+                        </div>
+                    `;
+                    
+                    this.issuesList.appendChild(issueElement);
+                });
+                
+                // Add event listeners to action buttons
+                const zoomButtons = document.querySelectorAll('.zoom-issue');
+                zoomButtons.forEach(button => {
+                    button.addEventListener('click', () => {
+                        const elementId = button.getAttribute('data-id');
+                        this.zoomToElement(elementId);
+                    });
+                });
+                
+                const highlightButtons = document.querySelectorAll('.highlight-issue');
+                highlightButtons.forEach(button => {
+                    button.addEventListener('click', () => {
+                        const elementId = button.getAttribute('data-id');
+                        this.highlightElement(elementId);
+                    });
+                });
+                
+                // Update report panel
+                this.updateReportPanel();
+            }
+            
+            updateReportPanel() {
+                // Update compliance percentage
+                const compliancePercentage = this.ruleEngine.getCompliancePercentage();
+                document.getElementById('compliance-percentage').textContent = `${compliancePercentage}%`;
+                document.getElementById('compliance-bar').style.width = `${compliancePercentage}%`;
+                
+                // Update last check date
+                const now = new Date();
+                document.getElementById('last-check-date').textContent = now.toLocaleString();
+                
+                // Update issue counts
+                const totalIssues = this.ruleEngine.validationResults.length;
+                document.getElementById('total-issues-count').textContent = totalIssues;
+                document.getElementById('report-critical-count').textContent = this.ruleEngine.resultsBySeverity.critical.length;
+                
+                // Update compliance status
+                document.getElementById('compliance-status').textContent = this.ruleEngine.getComplianceStatus();
+                
+                // Update category compliance
+                const categoryContainer = document.getElementById('category-progress-container');
+                categoryContainer.innerHTML = '';
+                
+                this.ruleEngine.ruleCategories.forEach(category => {
+                    const compliance = this.ruleEngine.getCategoryCompliance(category.id);
+                    
+                    const categoryElement = document.createElement('div');
+                    categoryElement.className = 'progress-container';
+                    categoryElement.innerHTML = `
+                        <div class="progress-title">
+                            <div class="progress-label">${category.name}</div>
+                            <div class="progress-percentage">${compliance}%</div>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-value" style="width: ${compliance}%"></div>
+                        </div>
+                    `;
+                    
+                    categoryContainer.appendChild(categoryElement);
+                });
+            }
+            
+            createAnnotations(results) {
+                // Clear existing annotations
+                this.clearAnnotations();
+                
+                // Create new annotations
+                results.forEach((issue, index) => {
+                    const element = issue.element;
+                    
+                    // Get position for annotation (center of element)
+                    const position = this.getElementCenter(element);
+                    
+                    // Create annotation DOM element
+                    const annotationDiv = document.createElement('div');
+                    annotationDiv.className = `annotation ${issue.severity}`;
+                    annotationDiv.textContent = index + 1;
+                    annotationDiv.setAttribute('data-id', element.userData.id);
+                    
+                    // Create tooltip
+                    const tooltipDiv = document.createElement('div');
+                    tooltipDiv.className = 'tooltip';
+                    tooltipDiv.innerHTML = `
+                        <strong>${this.getRuleTitle(issue.ruleId)}</strong><br>
+                        ${issue.description}
+                    `;
+                    
+                    // Add event listeners
+                    annotationDiv.addEventListener('click', () => {
+                        this.highlightElement(element.userData.id);
+                        this.displayElementProperties(element);
+                    });
+                    
+                    annotationDiv.addEventListener('mouseenter', () => {
+                        tooltipDiv.style.display = 'block';
+                        tooltipDiv.style.left = `${annotationDiv.offsetLeft + 20}px`;
+                        tooltipDiv.style.top = `${annotationDiv.offsetTop}px`;
+                    });
+                    
+                    annotationDiv.addEventListener('mouseleave', () => {
+                        tooltipDiv.style.display = 'none';
+                    });
+                    
+                    // Store annotation data
+                    this.annotations.push({
+                        element: annotationDiv,
+                        tooltip: tooltipDiv,
+                        position: position,
+                        targetId: element.userData.id
+                    });
+                });
+                
+                // Hide annotations initially
+                this.annotationsVisible = false;
+            }
+            
+            getElementCenter(element) {
+                // Calculate center position of element
+                const box = new THREE.Box3().setFromObject(element);
+                const center = box.getCenter(new THREE.Vector3());
+                
+                return center;
+            }
+            
+            updateAnnotationsPositions() {
+                // Update positions of annotations based on camera view
+                this.annotations.forEach(annotation => {
+                    const worldPos = annotation.position.clone();
+                    
+                    // Convert 3D position to screen position
+                    const screenPos = worldPos.project(this.camera);
+                    
+                    // Convert to CSS position
+                    const x = (screenPos.x * 0.5 + 0.5) * this.renderer.domElement.clientWidth;
+                    const y = (-(screenPos.y * 0.5) + 0.5) * this.renderer.domElement.clientHeight;
+                    
+                    // Check if behind camera or out of view
+                    if (screenPos.z > 1 || 
+                        x < 0 || x > this.renderer.domElement.clientWidth || 
+                        y < 0 || y > this.renderer.domElement.clientHeight) {
+                        annotation.element.style.display = 'none';
+                    } else {
+                        annotation.element.style.display = 'flex';
+                        annotation.element.style.left = `${x}px`;
+                        annotation.element.style.top = `${y}px`;
+                    }
+                });
+            }
+            
+            toggleAnnotations(show) {
+                this.annotationsVisible = show;
+                
+                if (show) {
+                    // Add annotations to the DOM
+                    this.annotations.forEach(annotation => {
+                        this.container.appendChild(annotation.element);
+                        this.container.appendChild(annotation.tooltip);
+                    });
+                    
+                    // Update positions immediately
+                    this.updateAnnotationsPositions();
+                } else {
+                    // Remove annotations from the DOM
+                    this.annotations.forEach(annotation => {
+                        if (annotation.element.parentNode) {
+                            annotation.element.parentNode.removeChild(annotation.element);
+                        }
+                        if (annotation.tooltip.parentNode) {
+                            annotation.tooltip.parentNode.removeChild(annotation.tooltip);
+                        }
+                    });
+                }
+            }
+            
+            clearAnnotations() {
+                // Remove existing annotations
+                this.toggleAnnotations(false);
+                this.annotations = [];
+            }
+            
+            zoomToElement(elementId) {
+                const element = this.elements[elementId];
+                if (!element) return;
+                
+                // Calculate bounding box of the element
+                const box = new THREE.Box3().setFromObject(element);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                
+                // Calculate distance based on size
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const fov = this.camera.fov * (Math.PI / 180);
+                let distance = maxDim / (2 * Math.tan(fov / 2));
+                
+                // Add some margin
+                distance *= 1.5;
+                
+                // Set camera position
+                const direction = new THREE.Vector3(1, 0.5, 1).normalize();
+                this.camera.position.copy(center).add(direction.multiplyScalar(distance));
+                this.camera.lookAt(center);
+                
+                // Update controls target
+                this.controls.target.copy(center);
+                this.controls.update();
+                
+                // Highlight the element
+                this.highlightElement(elementId);
+            }
+            
+            highlightElement(elementId) {
+                const element = this.elements[elementId];
+                if (element) {
+                    this.highlightObject(element);
+                }
+            }
+            
+            highlightIssues() {
+                if (!this.ruleEngine.validationResults) return;
+                
+                // Reset all materials
+                this.showAllElements();
+                
+                // Create materials for different severities
+                const materials = {
+                    critical: new THREE.MeshPhongMaterial({ color: 0xe74c3c, transparent: true, opacity: 0.9 }),
+                    major: new THREE.MeshPhongMaterial({ color: 0xf39c12, transparent: true, opacity: 0.9 }),
+                    minor: new THREE.MeshPhongMaterial({ color: 0x3498db, transparent: true, opacity: 0.9 })
+                };
+                
+                // Highlight elements with issues
+                this.ruleEngine.validationResults.forEach(issue => {
+                    const element = issue.element;
+                    if (!element) return;
+                    
+                    // Store original material if not already stored
+                    if (!element.userData.originalMaterial) {
+                        element.userData.originalMaterial = element.material;
+                    }
+                    
+                    // Apply highlight material based on severity
+                    element.material = materials[issue.severity];
+                });
+                
+                // Show color legend
+                this.colorLegend.style.display = 'block';
+            }
+            
+            highlightIssuesByRule(ruleId) {
+                if (!this.ruleEngine.validationResults) return;
+                
+                // Reset all materials
+                this.showAllElements();
+                
+                // Filter issues by rule ID
+                const issues = this.ruleEngine.validationResults.filter(issue => issue.ruleId === ruleId);
+                
+                // Create highlight material
+                const highlightMaterial = new THREE.MeshPhongMaterial({ 
+                    color: 0x3498db, 
+                    emissive: 0x2980b9, 
+                    transparent: true,
+                    opacity: 0.8
+                });
+                
+                // Highlight elements with issues
+                issues.forEach(issue => {
+                    const element = issue.element;
+                    if (!element) return;
+                    
+                    // Store original material if not already stored
+                    if (!element.userData.originalMaterial) {
+                        element.userData.originalMaterial = element.material;
+                    }
+                    
+                    // Apply highlight material
+                    element.material = highlightMaterial;
+                });
+            }
+            
+            showAllElements() {
+                if (!this.model) return;
+                
+                // Restore original materials
+                this.model.traverse(child => {
+                    if (child.userData.originalMaterial) {
+                        child.material = child.userData.originalMaterial;
+                        delete child.userData.originalMaterial;
+                    }
+                });
+            }
+            
+            filterIssues(filter) {
+                if (!this.ruleEngine.validationResults) return;
+                
+                const items = this.issuesList.querySelectorAll('.issue-item');
+                
+                items.forEach(item => {
+                    if (filter === 'all') {
+                        item.style.display = 'block';
+                        return;
+                    }
+                    
+                    const severity = item.classList.contains('critical') ? 'critical' : 
+                                    item.classList.contains('major') ? 'major' : 'minor';
+                    
+                    const elementType = item.querySelector('.issue-element').textContent.toLowerCase();
+                    
+                    if ((filter === 'critical' || filter === 'major' || filter === 'minor') && severity === filter) {
+                        item.style.display = 'block';
+                    } else if (elementType.includes(filter)) {
+                        item.style.display = 'block';
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
+            }
+            
+            updateBuildingInfo() {
+                this.buildingInfo.name = document.getElementById('building-name').value;
+                this.buildingInfo.address = document.getElementById('building-address').value;
+                this.buildingInfo.floorArea = parseFloat(document.getElementById('building-floor-area').value);
+                this.buildingInfo.height = parseFloat(document.getElementById('building-height').value);
+                this.buildingInfo.occupancy = parseInt(document.getElementById('building-occupancy').value);
+            }
+            
+            switchPanel(panelId) {
+                // Update tab active state
+                document.querySelectorAll('.panel-tab').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+                document.querySelector(`.panel-tab[data-panel="${panelId}"]`).classList.add('active');
+                
+                // Update panel visibility
+                document.querySelectorAll('.panel-content').forEach(panel => {
+                    panel.classList.remove('active');
+                });
+                document.getElementById(`${panelId}-panel`).classList.add('active');
+            }
+            
+            switchRuleSet(rulesetId) {
+                // Update tab active state
+                document.querySelectorAll('.rule-tab').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+                document.querySelector(`.rule-tab[data-ruleset="${rulesetId}"]`).classList.add('active');
+                
+                // Update rule content visibility
+                document.querySelectorAll('.rule-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                document.getElementById(`${rulesetId}-rules`).classList.add('active');
+            }
+            
+            showRulesDialog() {
+                // Populate rules content
+                this.populateRules();
+                
+                // Show dialog
+                this.dialogOverlay.style.display = 'flex';
+            }
+            
+            populateRules() {
+                // Populate dwelling rules
+                const dwellingRules = document.getElementById('dwelling-rules');
+                dwellingRules.innerHTML = '';
+                
+                // Group rules by category
+                const dwellingRulesByCategory = {};
+                this.ruleEngine.ruleCategories.forEach(category => {
+                    dwellingRulesByCategory[category.id] = this.ruleEngine.ruleSets.dwelling.filter(rule => 
+                        rule.category === category.id
+                    );
+                });
+                
+                // Create rule categories
+                Object.entries(dwellingRulesByCategory).forEach(([categoryId, rules]) => {
+                    const category = this.ruleEngine.ruleCategories.find(c => c.id === categoryId);
+                    
+                    const categoryElement = document.createElement('div');
+                    categoryElement.className = 'rule-category';
+                    categoryElement.innerHTML = `
+                        <div class="rule-category-title">
+                            ${category.name}
+                            <div class="rule-count">(${rules.length})</div>
+                        </div>
+                    `;
+                    
+                    // Add rules
+                    rules.forEach(rule => {
+                        const ruleElement = document.createElement('div');
+                        ruleElement.className = 'rule-item';
+                        
+                        ruleElement.innerHTML = `
+                            <div class="rule-header">
+                                <div class="rule-title">${rule.title}</div>
+                                <div class="rule-severity ${rule.severity}">${rule.severity.charAt(0).toUpperCase() + rule.severity.slice(1)}</div>
+                            </div>
+                            <div class="rule-description">${rule.description}</div>
+                            <div class="rule-regulation">${rule.regulation}</div>
+                        `;
+                        
+                        categoryElement.appendChild(ruleElement);
+                    });
+                    
+                    dwellingRules.appendChild(categoryElement);
+                });
+                
+                // Populate non-dwelling rules
+                const nonDwellingRules = document.getElementById('non-dwelling-rules');
+                nonDwellingRules.innerHTML = '';
+                
+                // Group rules by category
+                const nonDwellingRulesByCategory = {};
+                this.ruleEngine.ruleCategories.forEach(category => {
+                    nonDwellingRulesByCategory[category.id] = this.ruleEngine.ruleSets.office.filter(rule => 
+                        rule.category === category.id
+                    );
+                });
+                
+                // Create rule categories
+                Object.entries(nonDwellingRulesByCategory).forEach(([categoryId, rules]) => {
+                    const category = this.ruleEngine.ruleCategories.find(c => c.id === categoryId);
+                    
+                    const categoryElement = document.createElement('div');
+                    categoryElement.className = 'rule-category';
+                    categoryElement.innerHTML = `
+                        <div class="rule-category-title">
+                            ${category.name}
+                            <div class="rule-count">(${rules.length})</div>
+                        </div>
+                    `;
+                    
+                    // Add rules
+                    rules.forEach(rule => {
+                        const ruleElement = document.createElement('div');
+                        ruleElement.className = 'rule-item';
+                        
+                        ruleElement.innerHTML = `
+                            <div class="rule-header">
+                                <div class="rule-title">${rule.title}</div>
+                                <div class="rule-severity ${rule.severity}">${rule.severity.charAt(0).toUpperCase() + rule.severity.slice(1)}</div>
+                            </div>
+                            <div class="rule-description">${rule.description}</div>
+                            <div class="rule-regulation">${rule.regulation}</div>
+                        `;
+                        
+                        categoryElement.appendChild(ruleElement);
+                    });
+                    
+                    nonDwellingRules.appendChild(categoryElement);
+                });
+            }
+            
+            exportReport(format) {
+                if (!this.ruleEngine.validationResults) {
+                    alert('Please run a fire safety check first');
+                    return;
+                }
+                
+                if (format === 'pdf') {
+                    this.exportPDFReport();
+                } else if (format === 'csv') {
+                    this.exportCSVReport();
+                }
+            }
+            
+            exportPDFReport() {
+                // Create PDF document
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                
+                // Title
+                doc.setFontSize(18);
+                doc.text('Fire Safety Compliance Report', 105, 15, { align: 'center' });
+                
+                // Building info
+                doc.setFontSize(14);
+                doc.text('Building Information', 14, 25);
+                
+                doc.setFontSize(10);
+                doc.text(`Name: ${this.buildingInfo.name}`, 14, 35);
+                doc.text(`Address: ${this.buildingInfo.address}`, 14, 40);
+                doc.text(`Type: ${this.buildingInfo.buildingType.charAt(0).toUpperCase() + this.buildingInfo.buildingType.slice(1)}`, 14, 45);
+                doc.text(`Floor Area: ${this.buildingInfo.floorArea} m²`, 14, 50);
+                doc.text(`Height: ${this.buildingInfo.height} m`, 14, 55);
+                doc.text(`Occupancy: ${this.buildingInfo.occupancy} persons`, 14, 60);
+                
+                // Compliance summary
+                doc.setFontSize(14);
+                doc.text('Compliance Summary', 14, 75);
+                
+                const compliancePercentage = this.ruleEngine.getCompliancePercentage();
+                const complianceStatus = this.ruleEngine.getComplianceStatus();
+                const now = new Date();
+                
+                doc.setFontSize(10);
+                doc.text(`Date of Check: ${now.toLocaleDateString()}`, 14, 85);
+                doc.text(`Overall Compliance: ${compliancePercentage}%`, 14, 90);
+                doc.text(`Status: ${complianceStatus}`, 14, 95);
+                doc.text(`Total Issues: ${this.ruleEngine.validationResults.length}`, 14, 100);
+                doc.text(`Critical Issues: ${this.ruleEngine.resultsBySeverity.critical.length}`, 14, 105);
+                doc.text(`Major Issues: ${this.ruleEngine.resultsBySeverity.major.length}`, 14, 110);
+                doc.text(`Minor Issues: ${this.ruleEngine.resultsBySeverity.minor.length}`, 14, 115);
+                
+                // Issues table
+                doc.setFontSize(14);
+                doc.text('Fire Safety Issues', 14, 130);
+                
+                // Table header
+                const header = ['Severity', 'Element', 'Issue', 'Regulation'];
+                
+                // Table data
+                const data = this.ruleEngine.validationResults.map(issue => {
+                    return [
+                        issue.severity.charAt(0).toUpperCase() + issue.severity.slice(1),
+                        issue.element.userData.name,
+                        issue.description,
+                        this.getRuleRegulation(issue.ruleId)
+                    ];
+                });
+                
+                // Create table
+                doc.autoTable({
+                    head: [header],
+                    body: data,
+                    startY: 135,
+                    styles: { fontSize: 8 },
+                    columnStyles: {
+                        0: { cellWidth: 20 },
+                        1: { cellWidth: 30 },
+                        2: { cellWidth: 90 },
+                        3: { cellWidth: 40 }
+                    },
+                    headStyles: { fillColor: [52, 152, 219] }
+                });
+                
+                // Save PDF
+                doc.save(`${this.buildingInfo.name.replace(/\s+/g, '_')}_Fire_Safety_Report.pdf`);
+            }
+            
+            exportCSVReport() {
+                if (!this.ruleEngine.validationResults || this.ruleEngine.validationResults.length === 0) {
+                    alert('No issues to export');
+                    return;
+                }
+                
+                // CSV header
+                let csv = 'Severity,Element,Issue,Regulation\n';
+                
+                // Add each issue
+                this.ruleEngine.validationResults.forEach(issue => {
+                    const severity = issue.severity.charAt(0).toUpperCase() + issue.severity.slice(1);
+                    const element = issue.element.userData.name;
+                    const description = issue.description.replace(/,/g, ';');
+                    const regulation = this.getRuleRegulation(issue.ruleId).replace(/,/g, ';');
+                    
+                    csv += `${severity},${element},${description},${regulation}\n`;
+                });
+                
+                // Create download link
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.setAttribute('href', url);
+                link.setAttribute('download', `${this.buildingInfo.name.replace(/\s+/g, '_')}_Fire_Safety_Issues.csv`);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+            
+            generateDetailedPDFReport() {
+                // Create PDF document
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                
+                // Title page
+                doc.setFontSize(24);
+                doc.text('Fire Safety Compliance', 105, 60, { align: 'center' });
+                doc.text('Detailed Report', 105, 75, { align: 'center' });
+                
+                doc.setFontSize(12);
+                doc.text(`Building: ${this.buildingInfo.name}`, 105, 95, { align: 'center' });
+                doc.text(`Date: ${new Date().toLocaleDateString()}`, 105, 105, { align: 'center' });
+                
+                // Add logo placeholder
+                doc.rect(80, 15, 50, 30);
+                doc.setFontSize(10);
+                doc.text('LOGO', 105, 30, { align: 'center' });
+                
+                // Add new page for table of contents
+                doc.addPage();
+                
+                // Table of contents
+                doc.setFontSize(18);
+                doc.text('Table of Contents', 105, 15, { align: 'center' });
+                
+                doc.setFontSize(12);
+                doc.text('1. Building Information', 20, 30);
+                doc.text('2. Compliance Summary', 20, 40);
+                doc.text('3. Fire Safety Issues', 20, 50);
+                doc.text('   3.1 Critical Issues', 20, 60);
+                doc.text('   3.2 Major Issues', 20, 70);
+                doc.text('   3.3 Minor Issues', 20, 80);
+                doc.text('4. Recommendations', 20, 90);
+                doc.text('5. Regulatory References', 20, 100);
+                
+                // Add new page for building information
+                doc.addPage();
+                
+                // Building information
+                doc.setFontSize(18);
+                doc.text('1. Building Information', 14, 15);
+                
+                doc.setFontSize(12);
+                doc.text(`Name: ${this.buildingInfo.name}`, 14, 30);
+                doc.text(`Address: ${this.buildingInfo.address}`, 14, 40);
+                doc.text(`Type: ${this.buildingInfo.buildingType.charAt(0).toUpperCase() + this.buildingInfo.buildingType.slice(1)}`, 14, 50);
+                doc.text(`Floor Area: ${this.buildingInfo.floorArea} m²`, 14, 60);
+                doc.text(`Height: ${this.buildingInfo.height} m`, 14, 70);
+                doc.text(`Occupancy: ${this.buildingInfo.occupancy} persons`, 14, 80);
+                
+                // Add new page for compliance summary
+                doc.addPage();
+                
+                // Compliance summary
+                doc.setFontSize(18);
+                doc.text('2. Compliance Summary', 14, 15);
+                
+                const compliancePercentage = this.ruleEngine.getCompliancePercentage();
+                const complianceStatus = this.ruleEngine.getComplianceStatus();
+                
+                doc.setFontSize(12);
+                doc.text(`Overall Compliance: ${compliancePercentage}%`, 14, 30);
+                doc.text(`Status: ${complianceStatus}`, 14, 40);
+                doc.text(`Total Issues: ${this.ruleEngine.validationResults.length}`, 14, 50);
+                doc.text(`Critical Issues: ${this.ruleEngine.resultsBySeverity.critical.length}`, 14, 60);
+                doc.text(`Major Issues: ${this.ruleEngine.resultsBySeverity.major.length}`, 14, 70);
+                doc.text(`Minor Issues: ${this.ruleEngine.resultsBySeverity.minor.length}`, 14, 80);
+                
+                // Compliance by category
+                doc.text('Compliance by Category:', 14, 95);
+                
+                let y = 105;
+                this.ruleEngine.ruleCategories.forEach(category => {
+                    const compliance = this.ruleEngine.getCategoryCompliance(category.id);
+                    doc.text(`${category.name}: ${compliance}%`, 20, y);
+                    y += 10;
+                });
+                
+                // Add new page for issues
+                doc.addPage();
+                
+                // Fire safety issues
+                doc.setFontSize(18);
+                doc.text('3. Fire Safety Issues', 14, 15);
+                
+                // 3.1 Critical issues
+                doc.setFontSize(16);
+                doc.text('3.1 Critical Issues', 14, 30);
+                
+                if (this.ruleEngine.resultsBySeverity.critical.length > 0) {
+                    // Table header
+                    const criticalHeader = ['Element', 'Issue', 'Regulation'];
+                    
+                    // Table data
+                    const criticalData = this.ruleEngine.resultsBySeverity.critical.map(issue => {
+                        return [
+                            issue.element.userData.name,
+                            issue.description,
+                            this.getRuleRegulation(issue.ruleId)
+                        ];
+                    });
+                    
+                    // Create table
+                    doc.autoTable({
+                        head: [criticalHeader],
+                        body: criticalData,
+                        startY: 35,
+                        styles: { fontSize: 10 },
+                        columnStyles: {
+                            0: { cellWidth: 40 },
+                            1: { cellWidth: 90 },
+                            2: { cellWidth: 40 }
+                        },
+                        headStyles: { fillColor: [231, 76, 60] }
+                    });
+                } else {
+                    doc.setFontSize(12);
+                    doc.text('No critical issues found.', 20, 40);
+                }
+                
+                // Add new page for major issues
+                doc.addPage();
+                
+                // 3.2 Major issues
+                doc.setFontSize(16);
+                doc.text('3.2 Major Issues', 14, 15);
+                
+                if (this.ruleEngine.resultsBySeverity.major.length > 0) {
+                    // Table header
+                    const majorHeader = ['Element', 'Issue', 'Regulation'];
+                    
+                    // Table data
+                    const majorData = this.ruleEngine.resultsBySeverity.major.map(issue => {
+                        return [
+                            issue.element.userData.name,
+                            issue.description,
+                            this.getRuleRegulation(issue.ruleId)
+                        ];
+                    });
+                    
+                    // Create table
+                    doc.autoTable({
+                        head: [majorHeader],
+                        body: majorData,
+                        startY: 20,
+                        styles: { fontSize: 10 },
+                        columnStyles: {
+                            0: { cellWidth: 40 },
+                            1: { cellWidth: 90 },
+                            2: { cellWidth: 40 }
+                        },
+                        headStyles: { fillColor: [243, 156, 18] }
+                    });
+                } else {
+                    doc.setFontSize(12);
+                    doc.text('No major issues found.', 20, 25);
+                }
+                
+                // Add new page for minor issues
+                doc.addPage();
+                
+                // 3.3 Minor issues
+                doc.setFontSize(16);
+                doc.text('3.3 Minor Issues', 14, 15);
+                
+                if (this.ruleEngine.resultsBySeverity.minor.length > 0) {
+                    // Table header
+                    const minorHeader = ['Element', 'Issue', 'Regulation'];
+                    
+                    // Table data
+                    const minorData = this.ruleEngine.resultsBySeverity.minor.map(issue => {
+                        return [
+                            issue.element.userData.name,
+                            issue.description,
+                            this.getRuleRegulation(issue.ruleId)
+                        ];
+                    });
+                    
+                    // Create table
+                    doc.autoTable({
+                        head: [minorHeader],
+                        body: minorData,
+                        startY: 20,
+                        styles: { fontSize: 10 },
+                        columnStyles: {
+                            0: { cellWidth: 40 },
+                            1: { cellWidth: 90 },
+                            2: { cellWidth: 40 }
+                        },
+                        headStyles: { fillColor: [52, 152, 219] }
+                    });
+                } else {
+                    doc.setFontSize(12);
+                    doc.text('No minor issues found.', 20, 25);
+                }
+                
+                // Add new page for recommendations
+                doc.addPage();
+                
+                // 4. Recommendations
+                doc.setFontSize(18);
+                doc.text('4. Recommendations', 14, 15);
+                
+                doc.setFontSize(12);
+                doc.text('Based on the findings of this report, the following actions are recommended:', 14, 25);
+                
+                let recY = 35;
+                
+                // Add recommendations based on issues
+                if (this.ruleEngine.resultsBySeverity.critical.length > 0) {
+                    doc.setFontSize(14);
+                    doc.text('Critical Priorities:', 14, recY);
+                    recY += 10;
+                    
+                    this.ruleEngine.resultsBySeverity.critical.forEach((issue, index) => {
+                        doc.setFontSize(12);
+                        const text = `${index + 1}. ${issue.recommendation || 'Address issue with ' + issue.element.userData.name}`;
+                        
+                        // Handle text wrapping
+                        const textLines = doc.splitTextToSize(text, 180);
+                        doc.text(textLines, 20, recY);
+                        recY += 7 * textLines.length;
+                    });
+                    
+                    recY += 5;
+                }
+                
+                if (this.ruleEngine.resultsBySeverity.major.length > 0) {
+                    doc.setFontSize(14);
+                    doc.text('Major Priorities:', 14, recY);
+                    recY += 10;
+                    
+                    this.ruleEngine.resultsBySeverity.major.forEach((issue, index) => {
+                        doc.setFontSize(12);
+                        const text = `${index + 1}. ${issue.recommendation || 'Address issue with ' + issue.element.userData.name}`;
+                        
+                        // Handle text wrapping
+                        const textLines = doc.splitTextToSize(text, 180);
+                        doc.text(textLines, 20, recY);
+                        recY += 7 * textLines.length;
+                    });
+                }
+                
+                // Add new page for regulatory references
+                doc.addPage();
+                
+                // 5. Regulatory References
+                doc.setFontSize(18);
+                doc.text('5. Regulatory References', 14, 15);
+                
+                doc.setFontSize(12);
+                doc.text('This fire safety assessment was conducted in accordance with the following regulations:', 14, 25);
+                
+                const regulations = [
+                    {
+                        name: 'Building Regulations 2006, Technical Guidance Document B - Fire Safety',
+                        description: 'Main document governing fire safety in buildings in Ireland.'
+                    },
+                    {
+                        name: 'Fire Services Acts 1981 and 2003',
+                        description: 'Legislation that provides for the establishment of fire authorities and outlines responsibilities for fire safety.'
+                    },
+                    {
+                        name: 'IS 3218:2013 - Fire Detection and Alarm Systems',
+                        description: 'Standard for fire detection and alarm systems in buildings.'
+                    },
+                    {
+                        name: 'IS 3217:2013 - Emergency Lighting',
+                        description: 'Standard for emergency lighting in premises.'
+                    }
+                ];
+                
+                let regY = 40;
+                regulations.forEach((reg, index) => {
+                    doc.setFontSize(12);
+                    doc.setFont(undefined, 'bold');
+                    doc.text(`${index + 1}. ${reg.name}`, 14, regY);
+                    regY += 8;
+                    
+                    doc.setFont(undefined, 'normal');
+                    const textLines = doc.splitTextToSize(reg.description, 180);
+                    doc.text(textLines, 20, regY);
+                    regY += 7 * textLines.length + 5;
+                });
+                
+                // Save PDF
+                doc.save(`${this.buildingInfo.name.replace(/\s+/g, '_')}_Detailed_Fire_Safety_Report.pdf`);
+            }
+            
+            showLoading(message) {
+                this.loadingStatus.textContent = message || 'Loading...';
+                this.loadingScreen.style.display = 'flex';
+            }
+            
+            hideLoading() {
+                this.loadingScreen.style.display = 'none';
+            }
+            
+            clearModel() {
+                // Remove current model from scene
+                if (this.model) {
+                    this.scene.remove(this.model);
+                    this.model = null;
+                }
+                
+                // Clear elements data
+                this.elements = {};
+                
+                // Clear selection
+                this.clearHighlight();
+                this.selectedElement = null;
+                
+                // Update UI
+                this.elementInfo.textContent = 'No element selected';
+                this.modelStats.textContent = '';
+                this.propertyContent.style.display = 'none';
+                this.noSelection.style.display = 'flex';
+                
+                // Clear annotations
+                this.clearAnnotations();
+                
+                // Show no model message
+                this.noModel.style.display = 'flex';
+            }
+        }
+        
+        // Initialize the application when the page is loaded
+        window.addEventListener('DOMContentLoaded', () => {
+            const viewer = new IFCViewer();
+        });
+    </script>
+</body>
+</html>
